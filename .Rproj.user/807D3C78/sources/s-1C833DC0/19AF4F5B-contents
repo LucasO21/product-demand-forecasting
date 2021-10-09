@@ -115,7 +115,6 @@ forecast_horizon <- 12
 
 # * Feature Engineering Part I ----
 
-# * Transformations ----
 full_data_tbl <- combined_weekly_by_category %>% 
     select(date, everything(.)) %>% 
     
@@ -145,6 +144,39 @@ full_data_tbl <- combined_weekly_by_category %>%
     }) %>% 
     bind_rows() %>% 
     rowid_to_column(var = "rowid")
+
+
+# * Feature Engineering Part II ----
+
+# * Data Prepared ----
+data_prepared_tbl <- full_data_tbl %>% 
+    filter(!is.na(units_sold)) %>% 
+    drop_na()
+
+# * Future Data ----
+future_tbl <- full_data_tbl %>% 
+    filter(is.na(units_sold)) %>% 
+    mutate(across(.cols = contains("_lag"), 
+                  .fns  = ~ ifelse(is.nan(.x), NA, .x))
+    ) %>% 
+    fill(contains("_lag"), .direction = "up")
+
+
+# * Feature Engineering Part III: ----
+
+# * Time Series Split ----
+splits <- data_prepared_tbl %>% 
+    time_series_split(date, assess = 12, cumulative = TRUE)
+
+# Visualizing Time Series Split
+splits %>%
+    tk_time_series_cv_plan() %>% 
+    filter(product_category == "Art & Crafts") %>%
+    plot_time_series_cv_plan(
+        date,
+        units_sold,
+        .title = "Time Series Split - Art & Crafts",
+        .interactive = F) 
 
 
 
