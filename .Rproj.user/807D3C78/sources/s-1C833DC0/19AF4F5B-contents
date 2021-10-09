@@ -271,7 +271,7 @@ models_accuracy_tbl %>%
     select (-c(mape, mase, smape)) %>%
     write_rds(file = "Plots/models_accuracy_tbl.rds")
 
-# 6.8 Visualize Test Set Forecast ----
+# * 5.8 Visualize Test Set Forecast ----
 
 # Calibration
 calibration_tbl <- models_tbl %>% 
