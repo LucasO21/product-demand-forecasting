@@ -113,7 +113,7 @@ combined_weekly_by_category %>%
 # 3.0 FEATURE ENGINEERING ----
 forecast_horizon <- 12
 
-# * Feature Engineering Part I ----
+# * 3.1 Feature Engineering Part I ----
 
 full_data_tbl <- combined_weekly_by_category %>% 
     select(date, everything(.)) %>% 
@@ -146,7 +146,7 @@ full_data_tbl <- combined_weekly_by_category %>%
     rowid_to_column(var = "rowid")
 
 
-# * Feature Engineering Part II ----
+# * 3.2 Feature Engineering Part II ----
 
 # * Data Prepared ----
 data_prepared_tbl <- full_data_tbl %>% 
@@ -162,7 +162,7 @@ future_tbl <- full_data_tbl %>%
     fill(contains("_lag"), .direction = "up")
 
 
-# * Feature Engineering Part III: ----
+# * 3.3 Feature Engineering Part III: ----
 
 # * Time Series Split ----
 splits <- data_prepared_tbl %>% 
@@ -178,6 +178,93 @@ splits %>%
         .title = "Time Series Split - Art & Crafts",
         .interactive = F) 
 
+
+# 4.0 DATA PREPROCESSING ----
+
+# * 4.1 Recipes ----
+recipe_spec <- recipe(units_sold ~ ., data = training(splits)) %>% 
+    update_role(rowid, new_role = "indicator") %>% 
+    step_timeseries_signature(date) %>% 
+    step_rm(matches("(.iso|.xts|second|hour|day|minute|am.pm|wday|day)")) %>% 
+    step_normalize(date_index.num, date_year) %>% 
+    step_dummy(all_nominal(), one_hot = TRUE)
+
+
+recipe_spec %>% prep() %>% juice() %>% glimpse()
+
+# 5.0 MODELING ----
+
+# * 5.1 Prophet ----
+workflow_fit_prophet <- workflow() %>% 
+    add_model(
+        spec = prophet_reg() %>% set_engine("prophet")
+    ) %>% 
+    add_recipe(recipe_spec) %>% 
+    fit(training(splits))
+
+# * 5.2 XGBOOST ----
+workflow_fit_xgboost <- workflow() %>% 
+    add_model(
+        spec = boost_tree(mode = "regression") %>% set_engine("xgboost")
+    ) %>% 
+    add_recipe(recipe_spec %>% update_role(date, new_role = "indicator")) %>% 
+    fit(training(splits))
+
+# * 5.3 Prophet Boost ----
+workflow_fit_phrophet_boost <- workflow() %>% 
+    add_model(
+        spec = prophet_boost(
+            seasonality_daily = F,
+            seasonality_weekly = F,
+            seasonality_yearly = F
+        ) %>% set_engine("prophet_xgboost")
+    ) %>% add_recipe(recipe_spec) %>% 
+    fit(training(splits))
+
+# * 5.4 Random Forest ----
+workflow_fit_ranger <- workflow() %>% 
+    add_model(
+        spec = rand_forest(mode = "regression") %>% set_engine("ranger")
+    ) %>% add_recipe(recipe_spec %>% update_role(date, new_role = "indicator")) %>% 
+    fit(training(splits))
+
+
+# * 5.5 Cubist ----
+workflow_fit_cubist <- workflow() %>% 
+    add_model(
+        spec = cubist_rules() %>% set_engine("Cubist")
+    ) %>% add_recipe(recipe_spec %>% update_role(date, new_role = "indicator")) %>% 
+    fit(training(splits))
+
+# * 5.6 Mars ----
+workflow_fit_mars <- workflow() %>% 
+    add_model(
+        spec = mars(mode = "regression") %>% set_engine("earth")
+    ) %>% 
+    add_recipe(recipe_spec %>% update_role(date, new_role = "indicator")) %>% 
+    fit(training(splits))
+
+# * 5.7 Model Evaluation (Accuracy Check) ----
+
+# Modeltime Table
+models_tbl <- modeltime_table(
+    workflow_fit_prophet,
+    workflow_fit_xgboost,
+    workflow_fit_phrophet_boost,
+    workflow_fit_ranger,
+    workflow_fit_cubist,
+    workflow_fit_mars
+)
+
+# Modeltime Accuracy
+models_accuracy_tbl <- models_tbl %>% 
+    modeltime_accuracy(testing(splits)) %>% 
+    arrange(rmse)
+
+# Saving Modeltime Accuracy Table
+# models_accuracy_tbl %>% 
+#     select (-c(mape, mase, smape)) %>% 
+#     write_rds(file = "Plots/models_accuracy_tbl.rds")
 
 
 
