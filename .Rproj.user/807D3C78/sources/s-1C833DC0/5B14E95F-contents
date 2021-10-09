@@ -6,19 +6,19 @@ Detailed write up available [here](https://lucasoblog.netlify.app)
 
 A short project, forecasting demand for products at the product category and weekly level for a chain of stores. 
 
-### Approach
+## Approach
 
-#### Exploratory Data Analysis 
+#### Exploratory Data Analysis -
 This was performed to analyze trends. This included examining ACF and PACF, anomaly diagnostics, seasonality diagnostics, etc. Observations made was taken into account while engineering features for modeling.
 
-#### Feature Engineering
+### Feature Engineering -
 New features were engineered to capture trends in the data. These included - 
 
 * Lags
 * Rolling Averages
 * Fourier Series
 
-#### Modeling
+### Modeling -
 6 models were tested including - 
 * Prophet with Regressors
 * Prophet Boost (Prophet & XGBOOST)
@@ -27,10 +27,10 @@ New features were engineered to capture trends in the data. These included -
 * CUBIST
 * Random Forest
 
-#### Results
+### Results -
 The top 3 models in terms of accuracy were Prophet with Regressors, MARS and Random Forest. The Prophet with Regressors did not perform well on the future forecast. Additional techniques can be applied to improve results seen in this model
 
-# Tools / Packages Used
+### Tools / Packages Used -
 * R Programming Language
 * Modeltime Package
 * Timetk Package
