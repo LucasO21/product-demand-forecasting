@@ -78,3 +78,74 @@ combined_weekly_by_category %>%
         .facet_vars = product_category,
         .facet_ncol = 2
     )
+
+# * 2.3 Trend Diagnostics ----
+
+# * 2.1 ACF & PACF Plot - Art & Crafts ----
+combined_weekly_by_category %>% 
+    filter(product_category == "Art & Crafts") %>% 
+    plot_acf_diagnostics(
+        .date_var = date, .value = units_sold, .show_white_noise_bars = T, .interactive = T
+    )
+
+# * 2.4 ACF & PACF Plot - Games ----
+combined_weekly_by_category %>% 
+    filter(product_category == "Games") %>% 
+    plot_acf_diagnostics(
+        .date_var = date, .value = units_sold, .show_white_noise_bars = T, .interactive = T
+    )
+
+# * 2.5 Anomaly Diagnostics ----
+combined_weekly_by_category %>% 
+    group_by(product_category) %>% 
+    plot_anomaly_diagnostics(.date_var = date, .value = units_sold, .interactive = T,
+                             .facet_ncol = 2)
+
+# * 2.6 Seasonal Diagnostics ----
+combined_weekly_by_category %>% 
+    filter(product_category == "Art & Crafts") %>% 
+    plot_seasonal_diagnostics(
+        .date_var = date,
+        .value = units_sold
+    )
+
+
+# 3.0 FEATURE ENGINEERING ----
+forecast_horizon <- 12
+
+# * Feature Engineering Part I ----
+
+# * Transformations ----
+full_data_tbl <- combined_weekly_by_category %>% 
+    select(date, everything(.)) %>% 
+    
+    # Log Transformations
+    mutate(units_sold = log(units_sold)) %>% 
+    
+    # Group-Wise Feature Transformation
+    group_by(product_category) %>% 
+    future_frame(date, .length_out = forecast_horizon, .bind_data = T) %>% 
+    ungroup() %>% 
+    
+    # Lags, Rolling Features & Fourier Features
+    group_by(product_category) %>% 
+    group_split() %>% 
+    map(.f = function(df){
+        df %>% 
+            arrange(date) %>% 
+            tk_augment_fourier(date, .periods = c(2, 4)) %>% 
+            tk_augment_lags(units_sold, .lags = 4) %>% 
+            tk_augment_slidify(
+                units_sold_lag4,
+                .f = ~ mean(.x, na.rm = T),
+                .period  = c(1, 4, 8),
+                .partial = TRUE,
+                .align   = "center"
+            )
+    }) %>% 
+    bind_rows() %>% 
+    rowid_to_column(var = "rowid")
+
+
+
+

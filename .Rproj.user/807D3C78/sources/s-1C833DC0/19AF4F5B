@@ -3,7 +3,7 @@
     "path": "~/Desktop/School/2021_Projects/Product-Demand-Forecasting/script_product_forecasting.R",
     "project_path": "script_product_forecasting.R",
     "type": "r_source",
-    "hash": "2507745980",
+    "hash": "1209395223",
     "contents": "",
     "dirty": false,
     "created": 1633779311885.0,
@@ -13,15 +13,15 @@
         "tempName": "Untitled1",
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "80,0",
-        "scrollLine": "23"
+        "cursorPosition": "118,0",
+        "scrollLine": "94"
     },
     "folds": "",
-    "lastKnownWriteTime": 1633779738,
+    "lastKnownWriteTime": 1633781616,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1633779738442,
+    "last_content_update": 1633781616471,
     "read_only": false,
     "read_only_alternatives": []
 }
