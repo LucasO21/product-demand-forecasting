@@ -113,10 +113,13 @@ combined_weekly_by_category %>%
 # 3.0 FEATURE ENGINEERING ----
 forecast_horizon <- 12
 
-# * Feature Engineering Part I ----
+# * 3.1 Feature Engineering Part I ----
 
 full_data_tbl <- combined_weekly_by_category %>% 
     select(date, everything(.)) %>% 
+    group_by(product_category) %>% 
+    pad_by_time(.date_var = date, .by = "week", .pad_value = 0) %>% 
+    ungroup() %>% 
     
     # Log Transformations
     mutate(units_sold = log(units_sold)) %>% 
@@ -133,9 +136,9 @@ full_data_tbl <- combined_weekly_by_category %>%
         df %>% 
             arrange(date) %>% 
             tk_augment_fourier(date, .periods = c(2, 4)) %>% 
-            tk_augment_lags(units_sold, .lags = 4) %>% 
+            tk_augment_lags(units_sold, .lags = 12) %>% 
             tk_augment_slidify(
-                units_sold_lag4,
+                units_sold_lag12,
                 .f = ~ mean(.x, na.rm = T),
                 .period  = c(1, 4, 8),
                 .partial = TRUE,
@@ -146,7 +149,7 @@ full_data_tbl <- combined_weekly_by_category %>%
     rowid_to_column(var = "rowid")
 
 
-# * Feature Engineering Part II ----
+# * 3.2 Feature Engineering Part II ----
 
 # * Data Prepared ----
 data_prepared_tbl <- full_data_tbl %>% 
@@ -155,14 +158,16 @@ data_prepared_tbl <- full_data_tbl %>%
 
 # * Future Data ----
 future_tbl <- full_data_tbl %>% 
-    filter(is.na(units_sold)) %>% 
+    filter(is.na(units_sold)) 
+
+future_tbl <- future_tbl %>% 
     mutate(across(.cols = contains("_lag"), 
                   .fns  = ~ ifelse(is.nan(.x), NA, .x))
     ) %>% 
     fill(contains("_lag"), .direction = "up")
 
 
-# * Feature Engineering Part III: ----
+# * 3.3 Feature Engineering Part III: ----
 
 # * Time Series Split ----
 splits <- data_prepared_tbl %>% 
@@ -179,5 +184,157 @@ splits %>%
         .interactive = F) 
 
 
+# 4.0 DATA PREPROCESSING ----
+
+# * 4.1 Recipes ----
+recipe_spec <- recipe(units_sold ~ ., data = training(splits)) %>% 
+    update_role(rowid, new_role = "indicator") %>% 
+    step_timeseries_signature(date) %>% 
+    step_rm(matches("(.iso|.xts|second|hour|day|minute|am.pm|wday|day)")) %>% 
+    step_normalize(date_index.num, date_year) %>% 
+    step_dummy(all_nominal(), one_hot = TRUE)
 
 
+recipe_spec %>% prep() %>% juice() %>% glimpse()
+
+# 5.0 MODELING ----
+
+# * 5.1 Prophet ----
+workflow_fit_prophet <- workflow() %>% 
+    add_model(
+        spec = prophet_reg() %>% set_engine("prophet")
+    ) %>% 
+    add_recipe(recipe_spec) %>% 
+    fit(training(splits))
+
+# * 5.2 XGBOOST ----
+workflow_fit_xgboost <- workflow() %>% 
+    add_model(
+        spec = boost_tree(mode = "regression") %>% set_engine("xgboost")
+    ) %>% 
+    add_recipe(recipe_spec %>% update_role(date, new_role = "indicator")) %>% 
+    fit(training(splits))
+
+# * 5.3 Prophet Boost ----
+workflow_fit_phrophet_boost <- workflow() %>% 
+    add_model(
+        spec = prophet_boost(
+            seasonality_daily = F,
+            seasonality_weekly = F,
+            seasonality_yearly = F
+        ) %>% set_engine("prophet_xgboost")
+    ) %>% add_recipe(recipe_spec) %>% 
+    fit(training(splits))
+
+# * 5.4 Random Forest ----
+workflow_fit_ranger <- workflow() %>% 
+    add_model(
+        spec = rand_forest(mode = "regression") %>% set_engine("ranger")
+    ) %>% add_recipe(recipe_spec %>% update_role(date, new_role = "indicator")) %>% 
+    fit(training(splits))
+
+
+# * 5.5 Cubist ----
+workflow_fit_cubist <- workflow() %>% 
+    add_model(
+        spec = cubist_rules() %>% set_engine("Cubist")
+    ) %>% add_recipe(recipe_spec %>% update_role(date, new_role = "indicator")) %>% 
+    fit(training(splits))
+
+# * 5.6 Mars ----
+workflow_fit_mars <- workflow() %>% 
+    add_model(
+        spec = mars(mode = "regression") %>% set_engine("earth")
+    ) %>% 
+    add_recipe(recipe_spec %>% update_role(date, new_role = "indicator")) %>% 
+    fit(training(splits))
+
+# * 5.7 Model Evaluation (Accuracy Check) ----
+
+# Modeltime Table
+models_tbl <- modeltime_table(
+    workflow_fit_prophet,
+    workflow_fit_xgboost,
+    workflow_fit_phrophet_boost,
+    workflow_fit_ranger,
+    workflow_fit_cubist,
+    workflow_fit_mars
+)
+
+# Modeltime Accuracy
+models_accuracy_tbl <- models_tbl %>% 
+    modeltime_accuracy(testing(splits)) %>% 
+    arrange(rmse)
+
+# Saving Modeltime Accuracy Table
+models_accuracy_tbl %>%
+    select (-c(mape, mase, smape)) %>%
+    write_rds(file = "Plots/models_accuracy_tbl.rds")
+
+# 6.8 Visualize Test Set Forecast ----
+
+# Calibration
+calibration_tbl <- models_tbl %>% 
+    modeltime_calibrate(new_data = testing(splits))
+
+forecast_plot <- function(model){
+    
+    forecast_data <- calibration_tbl %>% 
+        modeltime_forecast(
+            new_data = testing(splits),
+            actual_data = data_prepared_tbl,
+            keep_data = T
+        ) %>% 
+        filter(.model_desc %in% c(model, "ACTUAL")) %>% 
+        mutate(units_sold = exp(units_sold),
+               .value = exp(.value)) 
+    
+    forecast_plot <- forecast_data %>% 
+        group_by(product_category) %>% 
+        plot_modeltime_forecast(
+            .facet_ncol = 2,
+            .conf_interval_alpha = 0.1,
+            .interactive = F
+        )+
+        scale_y_continuous(labels = scales::comma_format())
+    
+    return(forecast_plot)
+    
+}
+
+forecast_plot(model = "PROPHET W/ REGRESSORS") %>% 
+    write_rds("Plots/test_forecast_prophet_reg.rds")
+
+forecast_plot(model = "EARTH") %>% 
+    write_rds("Plots/test_forecast_earth.rds")
+
+forecast_plot(model = "RANGER") %>% 
+    write_rds("Plots/test_plot_ranger.rds")
+
+
+# 7.0 FUTURE FORECAST ----
+
+# * Refit ----
+model_refit_tbl <- models_tbl %>% 
+    filter(.model_id %in% c(1, 6, 4)) %>% 
+    modeltime_refit(data_prepared_tbl)
+
+# * Future Forecast ----
+future_forecast_tbl <- model_refit_tbl %>% 
+    modeltime_forecast(
+        new_data = future_tbl,
+        actual_data = data_prepared_tbl,
+        keep_data = TRUE
+    ) %>% 
+    mutate(
+        .value = exp(.value),
+        .units_sold = exp(units_sold)
+    )
+
+future_forecast_tbl %>% 
+    group_by(product_category) %>% 
+    plot_modeltime_forecast(
+        .facet_ncol = 2,
+        .conf_interval_alpha = 0.1,
+        .interactive = F
+    )
